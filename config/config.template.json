@@ -1,0 +1,44 @@
+{
+    "serviceUrl": "@SERVICE_URL@",
+    "fieldsToIgnore": [
+        "ks",
+        "kalsig"
+    ],
+
+    "preProcessValidators": [{
+        "require": "./lib/method-validator"
+    },{
+        "require": "./lib/path-validator",
+        "paths": [
+            "^/api_v3/service/[^\\/]+/action/[^\\/]+",
+            "^/v\\d+_\\d+/api_v3/service/[^\\/]+/action/[^\\/]+"
+        ]
+    }],
+    "processors": [{
+        "require": "./lib/query-string-processor"
+    },{
+        "require": "./lib/ks-processor",
+        "secrets": {
+            //"@PARTNER_ID@": "@PARTNER_SECRET@"
+        }
+    }],
+    "validators": [{
+        "require": "./lib/ks-validator"
+    },{
+        "require": "./lib/throttler"
+    }],
+    "cachers": [{
+        "require": "./lib/file-cacher",
+        "path": "./cache"
+    }],
+    "proxies": [{
+        "require": "./lib/api-proxy",
+        "target": "@SERVICE_URL@",
+        "paths": [
+            "^/api_v3/service/[^\\/]+/action/[^\\/]+",
+            "^/v\\d+_\\d+/api_v3/service/[^\\/]+/action/[^\\/]+"
+        ]
+    },{
+        "require": "./lib/test-proxy"
+    }]
+}
