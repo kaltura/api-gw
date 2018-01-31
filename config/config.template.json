@@ -19,7 +19,17 @@
     },{
         "require": "./lib/ks-processor",
         "secrets": {
-            //"@PARTNER_ID@": "@PARTNER_SECRET@"
+            "@PARTNER_ID@": "@PARTNER_SECRET@"
+        }
+    },{
+        "require": "./lib/version-processor",
+        "overrides": {
+            "@PARTNER_ID@": {
+                "v2_[345]": "v2_5",
+                "v2_x": "v2_9",
+                "v3_x": "v3_9",
+                "vx": "v4_6"
+            }
         }
     }],
     "validators": [{
