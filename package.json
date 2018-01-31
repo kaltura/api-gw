@@ -1,0 +1,34 @@
+{
+  "name": "api-gw",
+  "version": "0.1.0",
+  "description": "api-gw",
+  "main": "server.js",
+  "scripts": {
+    "test": "./node_modules/.bin/mocha --timeout 60000"
+  },
+  "repository": "",
+  "keywords": [
+    "node.js",
+    "eclipse",
+    "nodeclipse"
+  ],
+  "author": "",
+  "license": "MIT",
+  "readmeFilename": "README.md",
+  "dependencies": {
+    "bluebird": "^3.5.1",
+    "crypto": "^1.0.1",
+    "fs": "0.0.1-security",
+    "http": "0.0.0",
+    "http-proxy": "^1.16.2",
+    "kaltura-ott-client": "^4.6.2-8.17689",
+    "mcrypt": "^0.1.13",
+    "md5": "^2.2.1",
+    "sha1": "^1.1.1"
+  },
+  "devDependencies": {
+    "chai": "^4.1.2",
+    "mocha": "^5.0.0",
+    "shortid": "^2.2.8"
+  }
+}
