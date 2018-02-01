@@ -1,7 +1,9 @@
 const fs = require('fs');
+const os = require('os');
 const md5 = require('md5');
 const path = require('path');
 const http = require('http');
+const cluster = require("cluster");
 const Promise = require('bluebird');
 const kaltura = require('kaltura-ott-client');
 const dateFormat = require('dateformat');
@@ -12,14 +14,21 @@ class Server {
         const json = fs.readFileSync('./config/config.json');
         this.config = JSON.parse(json);
 
+        this._init();
+    }
+
+    _init() {
+        if (cluster.isMaster) {
+            let accessLogDir = path.dirname(this.config.accessLogPath.replace(/"/, ''));
+            if(!fs.existsSync(accessLogDir)) {
+                fs.mkdirSync(accessLogDir);
+            }
+        }
+
         let clientConfig = new kaltura.Configuration();
         clientConfig.serviceUrl = this.config.serviceUrl;
         this.client = new kaltura.Client(clientConfig);
 
-        let accessLogDir = path.dirname(this.config.accessLogPath.replace(/"/, ''));
-        if(!fs.existsSync(accessLogDir)) {
-            fs.mkdirSync(accessLogDir);
-        }
         let matches;
         let accessLogPath = this.config.accessLogPath;
         if(null !== (matches = /\{([^\}]+)\}/.exec(accessLogPath))) {
@@ -27,18 +36,14 @@ class Server {
         }
         this.accessLogFile = fs.openSync(accessLogPath, 'a');
 
-        this.preProcessValidators = this.initHelpers(this.config.preProcessValidators);
-        this.processors = this.initHelpers(this.config.processors);
-        this.validators = this.initHelpers(this.config.validators);
-        this.cachers = this.initHelpers(this.config.cachers);
-        this.proxies = this.initHelpers(this.config.proxies);
+        this.preProcessValidators = this._initHelpers(this.config.preProcessValidators);
+        this.processors = this._initHelpers(this.config.processors);
+        this.validators = this._initHelpers(this.config.validators);
+        this.cachers = this._initHelpers(this.config.cachers);
+        this.proxies = this._initHelpers(this.config.proxies);
     }
 
-    accessLog(str) {
-        fs.write(this.accessLogFile, str + "\n");
-    }
-
-    initHelpers(configs) {
+    _initHelpers(configs) {
         var helpers = [];
         if(configs) {
             for(var i = 0; i < configs.length; i++) {
@@ -51,10 +56,14 @@ class Server {
         return helpers;
     }
 
+    _accessLog(str) {
+        fs.write(this.accessLogFile, str + "\n");
+    }
+
     /**
      * Syncronic validator
      */
-    validatePreProcess(request, response) {
+    _validatePreProcess(request, response) {
         for(let i in this.preProcessValidators) {
             if(!this.preProcessValidators[i].validate(request, response)) {
                 return false;
@@ -63,7 +72,7 @@ class Server {
         return true;
     }
 
-    process(request, response) {
+    _process(request, response) {
         let This = this;
 
         request.originalUrl = request.url;
@@ -104,11 +113,11 @@ class Server {
             log += `"${http_x_forwarded_server}" "${http_x_forwarded_host}" "${sent_http_cache_control}" - `;
             log += `${connection} "${partner_id}" "${ks}" "${raw_post}" "${stub_response}" "${sent_http_x_me}"`;
             
-            This.accessLog(log);
+            This._accessLog(log);
         });
 
         let ret = new Promise((resolve, reject) => {
-            if(This.validatePreProcess(request, response)) {
+            if(This._validatePreProcess(request, response)) {
                 let onReadable = () => {
                     request.removeListener('readable', onReadable);
                     request.pause();
@@ -151,9 +160,12 @@ class Server {
         ret = ret.then(({json}) => {
             if(json) {
                 let body = JSON.stringify(json);
-                const buf = Buffer.from(body, 'utf8');
-                request.unshift(buf);
-                request.headers['content-length'] = body.length;
+
+                if(request.method == 'POST') {
+                    const buf = Buffer.from(body, 'utf8');
+                    request.unshift(buf);
+                    request.headers['content-length'] = body.length;
+                }
 
                 if(This.config.fieldsToIgnore) {
                     for(let i = 0; i < This.config.fieldsToIgnore.length; i++) {
@@ -171,13 +183,13 @@ class Server {
         return ret;
     }
 
-    validate(request, response) {
+    _validate(request, response) {
         return Promise.each(this.validators, (validator, index, length) => {
             return validator.validate(request, response);
         });
     }
 
-    start(request, response) {
+    _startCache(request, response) {
         var This = this;
 
         var _write = response.write;
@@ -207,7 +219,7 @@ class Server {
         });
     }
 
-    proxy(request, response) {
+    _proxy(request, response) {
         if(!this.proxies.length) {
             return Promise.reject('No proxy defined');
         }
@@ -217,15 +229,14 @@ class Server {
         .then(() => Promise.resolve(), () => Promise.reject('No proxy found'));
     }
 
-    listen() {
+    _listen() {
         var This = this;
 
         http.createServer((request, response) => {
-            
-            This.process(request, response)
-            .then(() => This.validate(request, response))
-            .then(() => This.start(request, response))
-            .then(() => This.proxy(request, response))
+            This._process(request, response)
+            .then(() => This._validate(request, response))
+            .then(() => This._startCache(request, response))
+            .then(() => This._proxy(request, response))
             .catch((err) => {
                 if(err) {
                     response.writeHead(500, {'Content-Type': 'text/plain'});
@@ -239,12 +250,43 @@ class Server {
                     }
                 }
             });
-
         }).listen(1337, '127.0.0.1');
         console.log('Server running at http://127.0.0.1:1337/');
     }
+
+    _spawn() {
+        const childProcess = cluster.fork();
+        console.log(`Worker ${childProcess.process.pid} started`);
+
+        const This = this;
+        childProcess.on('exit', (code) => {
+            This._onProcessExit(childProcess, code);
+        });
+
+        this.childProcesses[childProcess.process.pid] = childProcess;
+        return childProcess;
+    }
+
+    _onProcessExit (childProcess, code) {
+        console.log(`Worker ${childProcess.process.pid} died, exit code ${code}`);
+        delete this.childProcesses[childProcess.process.pid];
+        this._spawn();
+    }
+
+
+    start() {
+        if (cluster.isMaster) {
+            this.childProcesses = {};
+            const numCPUs = os.cpus().length;
+            for (let i = 1; i <= numCPUs; i++) {
+                this._spawn();
+            }
+        }
+        else {
+            this._listen();
+        }
+    }
 }
 
-
 const server = new Server();
-server.listen();
+server.start();
