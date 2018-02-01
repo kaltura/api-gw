@@ -3,6 +3,7 @@ const md5 = require('md5');
 const http = require('http');
 const Promise = require('bluebird');
 const kaltura = require('kaltura-ott-client');
+const dateFormat = require('dateformat');
 const StringDecoder = require('string_decoder').StringDecoder;
 
 class Server {
@@ -49,6 +50,48 @@ class Server {
     process(request, response) {
         let This = this;
 
+        request.originalUrl = request.url;
+        let startDate = new Date();
+        response.on('finish', () => {
+            let endDate = new Date();
+            let remote_addr = request.socket.address().address;
+            let remote_user; // TODO
+            let time_local = dateFormat(endDate, "dd/mmm/yyyy:HH:MM:ss " + dateFormat(endDate, "Z").substr(3));
+            let requestStr = `${request.method} ${request.originalUrl} HTTP/${request.httpVersion}`; // TODO
+            let status = response.statusCode;
+            let bytes_sent = response.getHeader('content-length');
+            let request_time = (endDate.getMilliseconds() - startDate.getMilliseconds()) / 1000;
+            let http_referer = request.headers.referer;
+            let http_user_agent = request.headers['user-agent'];
+            let http_host = request.headers.host;
+            let pid = process.pid;
+            let upstream_cache_status; // TODO
+            let request_length = request.headers['content-length'];
+            let sent_http_content_range = response.getHeader('content-range');
+            let http_x_forwarded_for = (request.headers['x-forwarded-for'] ? request.headers['x-forwarded-for'] : '');
+            let http_x_forwarded_server = (request.headers['x-forwarded-server'] ? request.headers['x-forwarded-server'] : '');
+            let http_x_forwarded_host = (request.headers['x-forwarded-host'] ? request.headers['x-forwarded-host'] : '');
+            let sent_http_cache_control = response.getHeader('cache-control');
+            let connection; // TODO
+            let partner_id = request.session ? request.session.partnerId : '';
+            let ks = request.session ? request.session.ks : '';
+            let raw_post = request.post;
+            let stub_response; // TODO
+            let sent_http_x_me = response.getHeader('x-me');
+
+            let log = `${remote_addr} - ${remote_user} [${time_local}] "${requestStr}" `;
+            log += `${status} ${bytes_sent} ${request_time} "${http_referer}" `;
+            log += `"${http_user_agent}"  `;
+            log += `"${http_host}" ${pid} - `;
+            log += `${upstream_cache_status} `;
+            log += `${request_length} "${sent_http_content_range}" "${http_x_forwarded_for}" `;
+            log += `"${http_x_forwarded_server}" "${http_x_forwarded_host}" "${sent_http_cache_control}" - `;
+            log += `${connection} "${partner_id}" "${ks}" "${raw_post}" "${stub_response}" "${sent_http_x_me}"`;
+            
+            console.dir(log);
+            //This.accessLog();
+        });
+
         let ret = new Promise((resolve, reject) => {
             if(This.validatePreProcess(request, response)) {
                 let onReadable = () => {
@@ -56,7 +99,7 @@ class Server {
                     request.pause();
 
                     let json;
-                    if(request.headers['content-type'].toLowerCase().startsWith('application/json')) {
+                    if(request.method == 'POST' && request.headers['content-type'].toLowerCase().startsWith('application/json')) {
                         const decoder = new StringDecoder('utf8');
                         let body = '';
                         let chunk;
@@ -64,6 +107,7 @@ class Server {
                             const str = decoder.write(chunk);
                             body += str;
                         }
+                        request.post = body;
                         json = JSON.parse(body);
                     }
                     resolve({
