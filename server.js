@@ -3,6 +3,7 @@ const os = require('os');
 const md5 = require('md5');
 const path = require('path');
 const http = require('http');
+const https = require('https');
 const cluster = require("cluster");
 const Promise = require('bluebird');
 const kaltura = require('kaltura-ott-client');
@@ -233,25 +234,19 @@ class Server {
         var This = this;
 
         http.createServer((request, response) => {
-            This._process(request, response)
-            .then(() => This._validate(request, response))
-            .then(() => This._startCache(request, response))
-            .then(() => This._proxy(request, response))
-            .catch((err) => {
-                if(err) {
-                    response.writeHead(500, {'Content-Type': 'text/plain'});
-                    console.error(err);
-                    if(typeof(err) == 'object' && err.message) {
-                        
-                        response.end(err.message);
-                    }
-                    else {
-                        response.end(err);
-                    }
-                }
-            });
-        }).listen(1337, '127.0.0.1');
-        console.log('Server running at http://127.0.0.1:1337/');
+            This._onRequest(request, response);
+        }).listen(this.config.httpPort, '127.0.0.1');
+        console.log('Server running at http://127.0.0.1:' + this.config.httpPort);
+
+        let options = {};
+        for(let key in this.config.sslOptions) {
+            options[key] = fs.readFileSync(this.config.sslOptions[key]);
+        }
+
+        https.createServer(options, (request, response) => {
+            This._onRequest(request, response);
+        }).listen(this.config.httpsPort, '127.0.0.1');
+        console.log('Server running at https://127.0.0.1:' + this.config.httpsPort);
     }
 
     _spawn() {
@@ -265,6 +260,26 @@ class Server {
 
         this.childProcesses[childProcess.process.pid] = childProcess;
         return childProcess;
+    }
+
+    _onRequest(request, response) {
+        this._process(request, response)
+        .then(() => this._validate(request, response))
+        .then(() => this._startCache(request, response))
+        .then(() => this._proxy(request, response))
+        .catch((err) => {
+            if(err) {
+                response.writeHead(500, {'Content-Type': 'text/plain'});
+                console.error(err);
+                if(typeof(err) == 'object' && err.message) {
+                    
+                    response.end(err.message);
+                }
+                else {
+                    response.end(err);
+                }
+            }
+        });
     }
 
     _onProcessExit (childProcess, code) {

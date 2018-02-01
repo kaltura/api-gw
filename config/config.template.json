@@ -1,9 +1,16 @@
 {
     "serviceUrl": "@SERVICE_URL@",
+    "accessLogPath": "./log/access.{yyyy-mm-dd}.log",
     "fieldsToIgnore": [
         "ks",
         "kalsig"
     ],
+    "httpPort": 1337,
+    "httpsPort": 1338,
+    "sslOptions": {
+        "key": "./config/key.pem",
+        "cert": "./config/cert.pem"
+    },
 
     "preProcessValidators": [{
         "require": "./lib/method-validator"
