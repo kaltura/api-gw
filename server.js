@@ -1,5 +1,6 @@
 const fs = require('fs');
 const md5 = require('md5');
+const path = require('path');
 const http = require('http');
 const Promise = require('bluebird');
 const kaltura = require('kaltura-ott-client');
@@ -15,11 +16,26 @@ class Server {
         clientConfig.serviceUrl = this.config.serviceUrl;
         this.client = new kaltura.Client(clientConfig);
 
+        let accessLogDir = path.dirname(this.config.accessLogPath.replace(/"/, ''));
+        if(!fs.existsSync(accessLogDir)) {
+            fs.mkdirSync(accessLogDir);
+        }
+        let matches;
+        let accessLogPath = this.config.accessLogPath;
+        if(null !== (matches = /\{([^\}]+)\}/.exec(accessLogPath))) {
+            accessLogPath = accessLogPath.replace(matches[0], dateFormat(new Date(), matches[1]));
+        }
+        this.accessLogFile = fs.openSync(accessLogPath, 'a');
+
         this.preProcessValidators = this.initHelpers(this.config.preProcessValidators);
         this.processors = this.initHelpers(this.config.processors);
         this.validators = this.initHelpers(this.config.validators);
         this.cachers = this.initHelpers(this.config.cachers);
         this.proxies = this.initHelpers(this.config.proxies);
+    }
+
+    accessLog(str) {
+        fs.write(this.accessLogFile, str + "\n");
     }
 
     initHelpers(configs) {
@@ -56,28 +72,28 @@ class Server {
             let endDate = new Date();
             let remote_addr = request.socket.address().address;
             let remote_user; // TODO
-            let time_local = dateFormat(endDate, "dd/mmm/yyyy:HH:MM:ss " + dateFormat(endDate, "Z").substr(3));
+            let time_local = dateFormat(endDate, "dd/mmm/yyyy:HH:MM:ss ") + dateFormat(endDate, "Z").substr(3);
             let requestStr = `${request.method} ${request.originalUrl} HTTP/${request.httpVersion}`; // TODO
             let status = response.statusCode;
-            let bytes_sent = response.getHeader('content-length');
+            let bytes_sent = (response.getHeader('content-length') ? response.getHeader('content-length') : '');
             let request_time = (endDate.getMilliseconds() - startDate.getMilliseconds()) / 1000;
-            let http_referer = request.headers.referer;
+            let http_referer = (request.headers.referer ? request.headers.referer : '');
             let http_user_agent = request.headers['user-agent'];
             let http_host = request.headers.host;
             let pid = process.pid;
             let upstream_cache_status; // TODO
             let request_length = request.headers['content-length'];
-            let sent_http_content_range = response.getHeader('content-range');
+            let sent_http_content_range = (response.getHeader('content-range') ? response.getHeader('content-range') : '');
             let http_x_forwarded_for = (request.headers['x-forwarded-for'] ? request.headers['x-forwarded-for'] : '');
             let http_x_forwarded_server = (request.headers['x-forwarded-server'] ? request.headers['x-forwarded-server'] : '');
             let http_x_forwarded_host = (request.headers['x-forwarded-host'] ? request.headers['x-forwarded-host'] : '');
-            let sent_http_cache_control = response.getHeader('cache-control');
+            let sent_http_cache_control = (response.getHeader('cache-control') ? response.getHeader('cache-control') : '');
             let connection; // TODO
             let partner_id = request.session ? request.session.partnerId : '';
             let ks = request.session ? request.session.ks : '';
             let raw_post = request.post;
             let stub_response; // TODO
-            let sent_http_x_me = response.getHeader('x-me');
+            let sent_http_x_me = (response.getHeader('x-me') ? response.getHeader('x-me') : '');
 
             let log = `${remote_addr} - ${remote_user} [${time_local}] "${requestStr}" `;
             log += `${status} ${bytes_sent} ${request_time} "${http_referer}" `;
@@ -88,8 +104,7 @@ class Server {
             log += `"${http_x_forwarded_server}" "${http_x_forwarded_host}" "${sent_http_cache_control}" - `;
             log += `${connection} "${partner_id}" "${ks}" "${raw_post}" "${stub_response}" "${sent_http_x_me}"`;
             
-            console.dir(log);
-            //This.accessLog();
+            This.accessLog(log);
         });
 
         let ret = new Promise((resolve, reject) => {
@@ -107,7 +122,7 @@ class Server {
                             const str = decoder.write(chunk);
                             body += str;
                         }
-                        request.post = body;
+                        request.post = body.replace(/[\r\n]/g, '');
                         json = JSON.parse(body);
                     }
                     resolve({
