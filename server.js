@@ -4,6 +4,9 @@ const md5 = require('md5');
 const path = require('path');
 const http = require('http');
 const https = require('https');
+const chalk = require('chalk');
+const logger = require("loglevel");
+const prefix = require('loglevel-plugin-prefix');
 const cluster = require("cluster");
 const Promise = require('bluebird');
 const kaltura = require('kaltura-ott-client');
@@ -19,6 +22,26 @@ class Server {
     }
 
     _init() {
+        const colors = {
+            TRACE: chalk.magenta,
+            DEBUG: chalk.cyan,
+            INFO: chalk.blue,
+            WARN: chalk.yellow,
+            ERROR: chalk.red,
+        };
+        prefix.reg(logger);          
+        prefix.apply(logger, {
+            format(level, name, timestamp) {
+                return `${chalk.gray(`[${timestamp}]`)} ${colors[level.toUpperCase()](level)} ${chalk.green(`${name}:`)}`;
+            },
+        });
+
+
+        this.logger = logger.getLogger('Server');
+        if(this.config.logLevel) {
+            this.logger.setLevel(this.config.logLevel);
+        }
+        
         if (cluster.isMaster) {
             let accessLogDir = path.dirname(this.config.accessLogPath.replace(/"/, ''));
             if(!fs.existsSync(accessLogDir)) {
@@ -50,6 +73,10 @@ class Server {
             for(var i = 0; i < configs.length; i++) {
                 var helperClass = require(configs[i].require);
                 configs[i].client = this.client;
+                configs[i].logger = logger.getLogger(helperClass.name);
+                if(configs[i].logLevel) {
+                    configs[i].logger.setLevel(configs[i].logLevel);
+                }
                 helpers.push(new helperClass(configs[i]));
             }
         }
@@ -236,7 +263,7 @@ class Server {
         http.createServer((request, response) => {
             This._onRequest(request, response);
         }).listen(this.config.httpPort, '127.0.0.1');
-        console.log('Server running at http://127.0.0.1:' + this.config.httpPort);
+        this.logger.log('Server running at http://127.0.0.1:' + this.config.httpPort);
 
         let options = {};
         for(let key in this.config.sslOptions) {
@@ -246,12 +273,12 @@ class Server {
         https.createServer(options, (request, response) => {
             This._onRequest(request, response);
         }).listen(this.config.httpsPort, '127.0.0.1');
-        console.log('Server running at https://127.0.0.1:' + this.config.httpsPort);
+        this.logger.log('Server running at https://127.0.0.1:' + this.config.httpsPort);
     }
 
     _spawn() {
         const childProcess = cluster.fork();
-        console.log(`Worker ${childProcess.process.pid} started`);
+        this.logger.log(`Worker ${childProcess.process.pid} started`);
 
         const This = this;
         childProcess.on('exit', (code) => {
@@ -270,7 +297,7 @@ class Server {
         .catch((err) => {
             if(err) {
                 response.writeHead(500, {'Content-Type': 'text/plain'});
-                console.error(err);
+                this.logger.error(err);
                 if(typeof(err) == 'object' && err.message) {
                     
                     response.end(err.message);
@@ -283,7 +310,7 @@ class Server {
     }
 
     _onProcessExit (childProcess, code) {
-        console.log(`Worker ${childProcess.process.pid} died, exit code ${code}`);
+        this.logger.log(`Worker ${childProcess.process.pid} died, exit code ${code}`);
         delete this.childProcesses[childProcess.process.pid];
         this._spawn();
     }

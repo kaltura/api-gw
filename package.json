@@ -17,12 +17,15 @@
   "readmeFilename": "README.md",
   "dependencies": {
     "bluebird": "^3.5.1",
+    "chalk": "^2.3.0",
     "crypto": "^1.0.1",
     "dateformat": "^3.0.2",
     "fs": "0.0.1-security",
     "http": "0.0.0",
     "http-proxy": "^1.16.2",
     "kaltura-ott-client": "^4.6.2-8.17689",
+    "loglevel": "^1.6.1",
+    "loglevel-plugin-prefix": "^0.8.3",
     "mcrypt": "^0.1.13",
     "md5": "^2.2.1",
     "sha1": "^1.1.1"
