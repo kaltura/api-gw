@@ -13,6 +13,8 @@ const kaltura = require('kaltura-ott-client');
 const dateFormat = require('dateformat');
 const StringDecoder = require('string_decoder').StringDecoder;
 
+const Filter = require('./lib/fiilter');
+
 class Server {
     constructor() {
         const json = fs.readFileSync('./config/config.json');
@@ -22,6 +24,24 @@ class Server {
     }
 
     _init() {
+        this._initClient();
+        this._initLogger();
+        this._initFilter();
+
+        this.preProcessValidators = this._initHelpers(this.config.preProcessValidators);
+        this.processors = this._initHelpers(this.config.processors);
+        this.validators = this._initHelpers(this.config.validators);
+        this.cachers = this._initHelpers(this.config.cachers);
+        this.proxies = this._initHelpers(this.config.proxies);
+    }
+
+    _initClient() {
+        let clientConfig = new kaltura.Configuration();
+        clientConfig.serviceUrl = this.config.serviceUrl;
+        this.client = new kaltura.Client(clientConfig);
+    }
+
+    _initLogger() {
         const colors = {
             TRACE: chalk.magenta,
             DEBUG: chalk.cyan,
@@ -49,35 +69,40 @@ class Server {
             }
         }
 
-        let clientConfig = new kaltura.Configuration();
-        clientConfig.serviceUrl = this.config.serviceUrl;
-        this.client = new kaltura.Client(clientConfig);
-
         let matches;
         let accessLogPath = this.config.accessLogPath;
         if(null !== (matches = /\{([^\}]+)\}/.exec(accessLogPath))) {
             accessLogPath = accessLogPath.replace(matches[0], dateFormat(new Date(), matches[1]));
         }
         this.accessLogFile = fs.openSync(accessLogPath, 'a');
+    }
 
-        this.preProcessValidators = this._initHelpers(this.config.preProcessValidators);
-        this.processors = this._initHelpers(this.config.processors);
-        this.validators = this._initHelpers(this.config.validators);
-        this.cachers = this._initHelpers(this.config.cachers);
-        this.proxies = this._initHelpers(this.config.proxies);
+    _initFilter() {
+        this.filters = {};
+        if(this.config.filters) {
+            for(var filterName in this.config.filters) {
+                var filter = new Filter(filterName, this.config.filters[filterName]);
+                this.filters[filterName] = filter;
+            }
+        }
     }
 
     _initHelpers(configs) {
         var helpers = [];
         if(configs) {
             for(var i = 0; i < configs.length; i++) {
-                var helperClass = require(configs[i].require);
-                configs[i].client = this.client;
-                configs[i].logger = logger.getLogger(helperClass.name);
-                if(configs[i].logLevel) {
-                    configs[i].logger.setLevel(configs[i].logLevel);
+                var config = configs[i];
+                var helperClass = require(config.require);
+                config.client = this.client;
+                config.logger = logger.getLogger(helperClass.name);
+                if(config.logLevel) {
+                    config.logger.setLevel(config.logLevel);
                 }
-                helpers.push(new helperClass(configs[i]));
+                if(config.filters) {
+                    var filters = config.filters.map(filterName => this.filters[filterName]);
+                    config.filters = filters;
+                }
+                helpers.push(new helperClass(config));
             }
         }
 

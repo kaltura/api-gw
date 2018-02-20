@@ -23,6 +23,7 @@
     "fs": "0.0.1-security",
     "http": "0.0.0",
     "http-proxy": "^1.16.2",
+    "ip-range-check": "0.0.2",
     "kaltura-ott-client": "^4.6.2-8.17689",
     "loglevel": "^1.6.1",
     "loglevel-plugin-prefix": "^0.8.3",
