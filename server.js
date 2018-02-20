@@ -81,8 +81,12 @@ class Server {
         this.filters = {};
         if(this.config.filters) {
             for(var filterName in this.config.filters) {
-                var filter = new Filter(filterName, this.config.filters[filterName]);
-                this.filters[filterName] = filter;
+                var config = this.config.filters[filterName];
+                var filterClass = Filter;
+                if(config.require) {
+                    filterClass = require(config.require);
+                }
+                this.filters[filterName] = new filterClass(filterName, config);
             }
         }
     }
@@ -102,7 +106,7 @@ class Server {
                     var filters = config.filters.map(filterName => this.filters[filterName]);
                     config.filters = filters;
                 }
-                helpers.push(new helperClass(config));
+                helpers.push(new helperClass(config, this));
             }
         }
 
