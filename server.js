@@ -33,6 +33,7 @@ class Server {
         this.validators = this._initHelpers(this.config.validators);
         this.cachers = this._initHelpers(this.config.cachers);
         this.proxies = this._initHelpers(this.config.proxies);
+        this.enrichers = this._initHelpers(this.config.enrichers);
     }
 
     _initClient() {
