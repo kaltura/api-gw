@@ -4,6 +4,7 @@
   "description": "api-gw",
   "main": "server.js",
   "scripts": {
+    "start": "node start",
     "test": "./node_modules/.bin/mocha --timeout 60000"
   },
   "repository": "",

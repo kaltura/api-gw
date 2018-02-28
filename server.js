@@ -4,6 +4,7 @@ const md5 = require('md5');
 const path = require('path');
 const http = require('http');
 const https = require('https');
+const dgram = require("dgram");
 const chalk = require('chalk');
 const logger = require("loglevel");
 const prefix = require('loglevel-plugin-prefix');
@@ -11,29 +12,47 @@ const cluster = require("cluster");
 const Promise = require('bluebird');
 const kaltura = require('kaltura-ott-client');
 const dateFormat = require('dateformat');
+const EventEmitter = require('events').EventEmitter;
 const StringDecoder = require('string_decoder').StringDecoder;
 
-const Filter = require('./lib/fiilter');
 
-class Server {
-    constructor() {
-        const json = fs.readFileSync('./config/config.json');
-        this.config = JSON.parse(json);
+const Filter = require('./lib/filter');
+
+class Server extends EventEmitter {
+
+    constructor(configPath) {
+        super();
+
+        if(!configPath) {
+            configPath = './config/config.json';
+        }
+        this.configPath = configPath;
+        if(cluster.isMaster) {
+            fs.watchFile(configPath, {persistent: false, interval: 1000}, (currStats, prevStats) => {
+                this._reload();
+            })
+        }
 
         this._init();
     }
 
     _init() {
-        this._initClient();
-        this._initLogger();
-        this._initFilter();
+        const json = fs.readFileSync(this.configPath);
+        this.config = JSON.parse(json);
 
-        this.preProcessValidators = this._initHelpers(this.config.preProcessValidators);
-        this.processors = this._initHelpers(this.config.processors);
-        this.validators = this._initHelpers(this.config.validators);
-        this.cachers = this._initHelpers(this.config.cachers);
-        this.proxies = this._initHelpers(this.config.proxies);
-        this.enrichers = this._initHelpers(this.config.enrichers);
+        this._initLogger();
+
+        if(cluster.isWorker) {
+            this._initClient();
+            this._initFilter();
+
+            this.preProcessValidators = this._initHelpers(this.config.preProcessValidators);
+            this.processors = this._initHelpers(this.config.processors);
+            this.validators = this._initHelpers(this.config.validators);
+            this.cachers = this._initHelpers(this.config.cachers);
+            this.proxies = this._initHelpers(this.config.proxies);
+            this.enrichers = this._initHelpers(this.config.enrichers);
+        }
     }
 
     _initClient() {
@@ -61,6 +80,20 @@ class Server {
         this.logger = logger.getLogger('Server');
         if(this.config.logLevel) {
             this.logger.setLevel(this.config.logLevel);
+        }
+        if(this.config.logUdpPort) {
+            const udpPort = this.config.logUdpPort;
+            const socket = dgram.createSocket('udp4');
+            let _consoleLog = console.log;
+            let _consoleErr = console.error;
+            console.log = (msg) => {
+                _consoleLog.apply(console, [msg]);
+                socket.send(Buffer.from(msg), udpPort, 'localhost');
+            };
+            console.error = (msg) => {
+                _consoleErr.apply(console, [msg]);
+                socket.send(Buffer.from(msg), udpPort, 'localhost');
+            };
         }
         
         if (cluster.isMaster) {
@@ -136,6 +169,7 @@ class Server {
         request.originalUrl = request.url;
         let startDate = new Date();
         response.on('finish', () => {
+            this.logger.debug(`Request [${request.key}]`);
             let endDate = new Date();
             let remote_addr = request.socket.address().address;
             let remote_user; // TODO
@@ -190,7 +224,12 @@ class Server {
                             body += str;
                         }
                         request.post = body.replace(/[\r\n]/g, '');
-                        json = JSON.parse(body);
+                        try{
+                            json = JSON.parse(body);
+                        } 
+                        catch(err) {
+                            throw err + `, Body: ${body}`
+                        }
                     }
                     resolve({
                         request: request,
@@ -255,6 +294,7 @@ class Server {
 
         response.cache = '';
         response.write = (chunk, encoding, callback) => {
+            //this.logger.debug(`Request [${request.key}] write`, chunk.toString('utf8'));
             response.cache += chunk;
             return _write.apply(response, [chunk, encoding, callback]);
         };
@@ -290,30 +330,71 @@ class Server {
     _listen() {
         var This = this;
 
-        http.createServer((request, response) => {
-            This._onRequest(request, response);
-        }).listen(this.config.httpPort, '127.0.0.1');
-        this.logger.log('Server running at http://127.0.0.1:' + this.config.httpPort);
+        let serversWaitingForListenEvent = 0;
 
-        let options = {};
-        for(let key in this.config.sslOptions) {
-            options[key] = fs.readFileSync(this.config.sslOptions[key]);
+        if(this.config.ports.http) {
+            serversWaitingForListenEvent++;
+            this.httpServer = http.createServer((request, response) => {
+                This._onRequest(request, response);
+            }).listen(this.config.ports.http, '127.0.0.1', () => {
+                serversWaitingForListenEvent--;
+                if(!serversWaitingForListenEvent) {
+                    process.send('listening');
+                }
+            });
         }
+        
+        if(this.config.ports.https && this.config.sslOptions) {
+            serversWaitingForListenEvent++;
+            let options = {};
+            for(let key in this.config.sslOptions) {
+                options[key] = fs.readFileSync(this.config.sslOptions[key]);
+            }
 
-        https.createServer(options, (request, response) => {
-            This._onRequest(request, response);
-        }).listen(this.config.httpsPort, '127.0.0.1');
-        this.logger.log('Server running at https://127.0.0.1:' + this.config.httpsPort);
+            this.httpsServer = https.createServer(options, (request, response) => {
+                This._onRequest(request, response);
+            }).listen(this.config.ports.https, '127.0.0.1', () => {
+                serversWaitingForListenEvent--;
+                if(!serversWaitingForListenEvent) {
+                    process.send('listening');
+                }
+            });
+        }
     }
 
-    _spawn() {
+    _reload() {
+        this.logger.info(`Reloading server`);
+        this.reloading = true;
+        this.processesToKill = Object.keys(this.childProcesses);
+        this._reloadNextChildProcess();
+    }
+
+    _reloadNextChildProcess() {
+        if(!this.processesToKill.length) {
+            this.logger.info(`Server reloaded`);
+            return;
+        }
+
+        let nextChildProcess = this.processesToKill.pop();
+        this.childProcesses[nextChildProcess].disconnect();
+    }
+
+    _spawn(callback) {
         const childProcess = cluster.fork();
-        this.logger.log(`Worker ${childProcess.process.pid} started`);
+        this.logger.info(`Worker ${childProcess.process.pid} started`);
 
         const This = this;
         childProcess.on('exit', (code) => {
             This._onProcessExit(childProcess, code);
         });
+
+        if(callback) {
+            childProcess.on('message', (message) => {
+                if(message == 'listening') {
+                    callback();
+                }
+            });
+        }
 
         this.childProcesses[childProcess.process.pid] = childProcess;
         return childProcess;
@@ -340,25 +421,64 @@ class Server {
     }
 
     _onProcessExit (childProcess, code) {
-        this.logger.log(`Worker ${childProcess.process.pid} died, exit code ${code}`);
+        this.logger.info(`Worker ${childProcess.process.pid} died, exit code ${code}`);
         delete this.childProcesses[childProcess.process.pid];
-        this._spawn();
+        if(this.closing) {
+            if(Object.keys(this.childProcesses).length == 0) {
+                this.logger.info(`All workers closed`);
+                process.exit(0);
+            }
+        }
+        else if(this.reloading){
+            this._spawn(() => {
+                this._reloadNextChildProcess();
+            });
+        }
+        else {
+            this._spawn();
+        }
     }
 
 
     start() {
+        let This = this;
+
         if (cluster.isMaster) {
-            this.childProcesses = {};
+            let startedPorts = {};
+            cluster.on('listening', (worker, address) => {
+                if(address && !startedPorts[address.port]) {
+                    startedPorts[address.port] = true;
+                    this.logger.debug(`Server running at ${address.address}:${address.port}`);
+                    This.emit('listening', address);
+                    if(process.connected && Object.keys(startedPorts).length == 2) { // both http and https 
+                        process.send('listening');
+                    }
+                }
+            });
+            This.childProcesses = {};
             const numCPUs = os.cpus().length;
             for (let i = 1; i <= numCPUs; i++) {
-                this._spawn();
+                This._spawn();
             }
+
+            process.on('message', (message) => {
+                if(message == 'stop') {
+                    This.stop();
+                }
+            });
         }
         else {
-            this._listen();
+            This._listen();
+        }
+    }
+
+    stop() {
+        this.logger.debug('Stopping server');
+        this.closing = true;
+        for(let pid in this.childProcesses) {
+            this.childProcesses[pid].disconnect();
         }
     }
 }
 
-const server = new Server();
-server.start();
+module.exports = Server;

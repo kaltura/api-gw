@@ -19,7 +19,6 @@ describe("ks-processor", () => {
     	it('cracked', (done) => {
 			
 			let details = ksProcessor.crackKs(ks)
-			console.dir(details);
 			expect(details.partnerId).to.equal(203);
 			done();
         });
