@@ -8,7 +8,6 @@ const cluster = require("cluster");
 const Promise = require('bluebird');
 const kaltura = require('kaltura-ott-client');
 const EventEmitter = require('events').EventEmitter;
-const StringDecoder = require('string_decoder').StringDecoder;
 
 
 const Filter = require('./lib/filter');
@@ -125,76 +124,33 @@ class Server extends EventEmitter {
     _process(request, response) {
         let This = this;
 
-        let ret = new Promise((resolve, reject) => {
-            if(This._prerequisite(request, response)) {
-                let onReadable = () => {
-                    request.removeListener('readable', onReadable);
-                    request.pause();
-
-                    let json;
-                    if(request.method == 'POST' && request.headers['content-type'].toLowerCase().startsWith('application/json')) {
-                        const decoder = new StringDecoder('utf8');
-                        let body = '';
-                        let chunk;
-                        while (null !== (chunk = request.read())) {
-                            const str = decoder.write(chunk);
-                            body += str;
-                        }
-                        request.post = body.replace(/[\r\n]/g, '');
-                        try{
-                            json = JSON.parse(body);
-                        } 
-                        catch(err) {
-                            throw err + `, Body: ${body}`
-                        }
-                    }
-                    resolve({
-                        request: request,
-                        response: response,
-                        json: json
-                    });
-                };
-                request.on('readable', onReadable);
-            }
-            else {
-                reject();
-            }
-        });
+        if(!This._prerequisite(request, response)) {
+            return Promise.reject();
+        }
 
         let processPromise = (index) => {
             return (data) => {
-                return this.processors[index].process(data);
+                console.log(`Processing [${index}]`);
+                return This.processors[index].process(data);
             };
         };
 
+        let promise;
         let processIndex = 0;
         while(processIndex < this.processors.length) {
-            ret = ret.then(processPromise(processIndex++));
-        }
-        ret = ret.then(({json}) => {
-            if(json) {
-                let body = JSON.stringify(json);
-
-                if(request.method == 'POST') {
-                    const buf = Buffer.from(body, 'utf8');
-                    request.unshift(buf);
-                    request.headers['content-length'] = body.length;
-                }
-
-                if(This.config.fieldsToIgnore) {
-                    for(let i = 0; i < This.config.fieldsToIgnore.length; i++) {
-                        if(json[This.config.fieldsToIgnore[i]]) {
-                            delete json[This.config.fieldsToIgnore[i]];
-                        }
-                    }
-                    body = JSON.stringify(json);
-                }
-                request.key = md5(request.url + body);
+            if(!processIndex) {
+                promise = processPromise(processIndex).apply(null, [{
+                    request: request,
+                    response: response
+                }]);
             }
-            return Promise.resolve();
-        });
+            else {
+                promise = promise.then(processPromise(processIndex));
+            }
+            processIndex++;
+        }
 
-        return ret;
+        return promise;
     }
 
     _validate(request, response) {

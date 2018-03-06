@@ -24,7 +24,11 @@ const config = {
         cert: './config/cert.pem'
     },
     processors: [{
+        require: './lib/processors/parse-json'
+    }, {
         require: './lib/processors/query-string'
+    },{
+        require: './lib/processors/stringify-json'
     }],
     proxies: [{
         'require': './lib/proxies/test'
@@ -37,7 +41,6 @@ fs.writeFile(configPath, JSON.stringify(config));
 
 let serverProcess = null;
 
-let ks = 'djJ8MjAzfMvEqu4HezrDJfIF_726hVYCvtU0OH_nWAQd4e3kwtfHj7t2-7UPLXPEYwCnE7HOLS8EgBiM8SRqzDPmwZdYrBrZzrdLtGpOqvJJbhHrfajYG2VCjS-t6nx6I59bQozT81479NcOZGc9vOsJHuCDMpI0r1PEzrYOgkq--xiInHW3HZOCLrSXS8c8mWvHngSZQg==';
 let version = 'v2_6';
 let service = shortid.generate();
 let action = shortid.generate();
@@ -82,7 +85,6 @@ let queryString2 = {
 	}
 };
 let post = {
-	ks: ks,
 	aa1: 123,
 	aa2: shortid.generate(),
 	aa3: true,
@@ -231,7 +233,7 @@ function testRequest(protocol, port) {
 
 }
 
-describe('full-cycle', () => {
+describe('json', () => {
     describe('query', () => {
 		serverProcess = childProcess.fork('start', [configPath]);
 		serverProcess.on('message', (message) => {
