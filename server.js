@@ -4,7 +4,6 @@ const md5 = require('md5');
 const path = require('path');
 const http = require('http');
 const https = require('https');
-const dgram = require("dgram");
 const cluster = require("cluster");
 const Promise = require('bluebird');
 const kaltura = require('kaltura-ott-client');
@@ -13,6 +12,7 @@ const StringDecoder = require('string_decoder').StringDecoder;
 
 
 const Filter = require('./lib/filter');
+const loggerProvider = require('./lib/logger');
 
 class Server extends EventEmitter {
 
@@ -64,12 +64,10 @@ class Server extends EventEmitter {
             loggerOptions = this.config.logger;
         }
         
-        let loggerRequire = './lib/logger.js';
         if(loggerOptions.require) {
-            loggerRequire = loggerOptions.require;
+            loggerProvider = require(loggerOptions.require);
         }
-        let loggerClass = require(loggerRequire);
-        this.logger = new loggerClass(loggerOptions);
+        this.logger = loggerProvider.getLogger(loggerOptions);
     }
 
     _initFilter() {
@@ -99,7 +97,7 @@ class Server extends EventEmitter {
                 if(config.logLevel) {
                     loggerOptions.logLevel = config.logLevel;
                 }
-                config.logger = this.logger.getLogger(loggerOptions);
+                config.logger = loggerProvider.getLogger(loggerOptions);
                 
                 if(config.filters) {
                     var filters = config.filters.map(filterName => this.filters[filterName]);
