@@ -1,6 +1,5 @@
 const fs = require('fs');
 const os = require('os');
-const md5 = require('md5');
 const path = require('path');
 const http = require('http');
 const https = require('https');
@@ -130,7 +129,6 @@ class Server extends EventEmitter {
 
         let processPromise = (index) => {
             return (data) => {
-                console.log(`Processing [${index}]`);
                 return This.processors[index].process(data);
             };
         };
@@ -191,6 +189,16 @@ class Server extends EventEmitter {
     }
 
     _proxy(request, response) {
+        if(!this.proxies.length) {
+            return Promise.reject('No proxy defined');
+        }
+
+        var promises = this.proxies.map(proxy => proxy.proxy(request, response));
+        return Promise.any(promises)
+        .then(() => Promise.resolve(), () => Promise.reject('No proxy found'));
+    }
+
+    _enrich(request, response) {
         if(!this.proxies.length) {
             return Promise.reject('No proxy defined');
         }
@@ -278,6 +286,7 @@ class Server extends EventEmitter {
         .then(() => this._validate(request, response))
         .then(() => this._startCache(request, response))
         .then(() => this._proxy(request, response))
+        // .then(() => this._enrich(request, response))
         .catch((err) => {
             if(err) {
                 response.writeHead(500, {'Content-Type': 'text/plain'});
