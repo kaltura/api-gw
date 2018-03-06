@@ -367,7 +367,7 @@ class Server extends EventEmitter {
                     startedPorts[address.port] = true;
                     this.logger.debug(`Server running at ${address.address}:${address.port}`);
                     This.emit('listening', address);
-                    if(process.connected && Object.keys(startedPorts).length == 2) { // both http and https 
+                    if(process.connected && Object.keys(startedPorts).length == Object.keys(This.config.ports).length) {
                         process.send('listening');
                     }
                 }

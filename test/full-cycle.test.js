@@ -2,10 +2,8 @@ const fs = require('fs');
 const os = require('os');
 const http = require('http');
 const https = require('https');
-const dgram = require("dgram");
 const expect = require('chai').expect;
 const shortid = require('shortid');
-const kaltura = require('kaltura-ott-client');
 const querystring = require('querystring');
 const childProcess = require('child_process');
 
@@ -17,7 +15,6 @@ const ports = {
 };
 
 const config = {
-	accessLogPath: './log/access.{yyyy-mm-dd}.log',
 	logger: {
 		logLevel: "DEBUG"
 	},
@@ -238,7 +235,9 @@ describe('full-cycle', () => {
     describe('query', () => {
 		serverProcess = childProcess.fork('start', [configPath]);
 		serverProcess.on('message', (message) => {
-			listening = true;
+			if(message === 'listening') {
+				listening = true;
+			}
 		});
 		
 		for(let protocol in ports) {
