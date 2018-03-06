@@ -163,22 +163,36 @@ class Server extends EventEmitter {
         var _write = response.write;
         var _end = response.end;
 
-        response.cache = '';
+        response.body = '';
         response.write = (chunk, encoding, callback) => {
             //this.logger.debug(`Request [${request.key}] write`, chunk.toString('utf8'));
-            response.cache += chunk;
-            return _write.apply(response, [chunk, encoding, callback]);
+            response.body += chunk;
+            if(callback) {
+                callback(chunk.length);
+            }
+            return chunk.length;
+            //return _write.apply(response, [chunk, encoding, callback]);
         };
         response.end = (data, encoding, callback) => {
+            if(!response.body) {
+                response.body = '';
+            }
             if(data) {
-                response.cache += data;
+                response.body += data;
             }
 
-            if(response.cache && !response.disableCache) {
-                This.cachers.forEach(cacher => cacher.cache(request, response.headers, response.cache));
+            if(!response.fromCache) {
+                if(response.body) {
+                    This.enrichers.forEach(enricher => enricher.enrich(request, response));
+                }
+
+                if(response.body) {
+                    This.cachers.forEach(cacher => cacher.cache(request, response));
+                }
             }
             
-            return _end.apply(response, [data, encoding, callback]);
+            _write.apply(response, [response.body, encoding]);
+            return _end.apply(response, [response.body, encoding, callback]);
         };
 
         return new Promise((resolve, reject) => {
@@ -189,16 +203,6 @@ class Server extends EventEmitter {
     }
 
     _proxy(request, response) {
-        if(!this.proxies.length) {
-            return Promise.reject('No proxy defined');
-        }
-
-        var promises = this.proxies.map(proxy => proxy.proxy(request, response));
-        return Promise.any(promises)
-        .then(() => Promise.resolve(), () => Promise.reject('No proxy found'));
-    }
-
-    _enrich(request, response) {
         if(!this.proxies.length) {
             return Promise.reject('No proxy defined');
         }
@@ -286,7 +290,6 @@ class Server extends EventEmitter {
         .then(() => this._validate(request, response))
         .then(() => this._startCache(request, response))
         .then(() => this._proxy(request, response))
-        // .then(() => this._enrich(request, response))
         .catch((err) => {
             if(err) {
                 response.writeHead(500, {'Content-Type': 'text/plain'});
