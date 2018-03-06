@@ -18,17 +18,19 @@ const ports = {
 
 const config = {
 	accessLogPath: './log/access.{yyyy-mm-dd}.log',
-	logLevel: "DEBUG",
+	logger: {
+		logLevel: "DEBUG"
+	},
 	ports: ports,
     sslOptions: {
         key: './config/key.pem',
         cert: './config/cert.pem'
     },
     processors: [{
-        require: './lib/query-string-processor'
+        require: './lib/processors/query-string'
     }],
     proxies: [{
-        'require': './lib/test-proxy'
+        'require': './lib/proxies/test'
     }]
 };
 

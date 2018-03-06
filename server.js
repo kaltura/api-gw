@@ -5,9 +5,6 @@ const path = require('path');
 const http = require('http');
 const https = require('https');
 const dgram = require("dgram");
-const chalk = require('chalk');
-const logger = require("loglevel");
-const prefix = require('loglevel-plugin-prefix');
 const cluster = require("cluster");
 const Promise = require('bluebird');
 const kaltura = require('kaltura-ott-client');
@@ -45,7 +42,7 @@ class Server extends EventEmitter {
             this._initClient();
             this._initFilter();
 
-            this.preProcessValidators = this._initHelpers(this.config.preProcessValidators);
+            this.prerequisites = this._initHelpers(this.config.prerequisites);
             this.processors = this._initHelpers(this.config.processors);
             this.validators = this._initHelpers(this.config.validators);
             this.cachers = this._initHelpers(this.config.cachers);
@@ -61,39 +58,18 @@ class Server extends EventEmitter {
     }
 
     _initLogger() {
-        const colors = {
-            TRACE: chalk.magenta,
-            DEBUG: chalk.cyan,
-            INFO: chalk.blue,
-            WARN: chalk.yellow,
-            ERROR: chalk.red,
-        };
-        prefix.reg(logger);          
-        prefix.apply(logger, {
-            format(level, name, timestamp) {
-                return `${chalk.gray(`[${timestamp}]`)} ${colors[level.toUpperCase()](level)} ${chalk.green(`${name}:`)}`;
-            },
-        });
 
-
-        this.logger = logger.getLogger('Server');
-        if(this.config.logLevel) {
-            this.logger.setLevel(this.config.logLevel);
+        let loggerOptions = {};
+        if(this.config.logger) {
+            loggerOptions = this.config.logger;
         }
-        if(this.config.logUdpPort) {
-            const udpPort = this.config.logUdpPort;
-            const socket = dgram.createSocket('udp4');
-            let _consoleLog = console.log;
-            let _consoleErr = console.error;
-            console.log = (msg) => {
-                _consoleLog.apply(console, [msg]);
-                socket.send(Buffer.from(msg), udpPort, 'localhost');
-            };
-            console.error = (msg) => {
-                _consoleErr.apply(console, [msg]);
-                socket.send(Buffer.from(msg), udpPort, 'localhost');
-            };
+        
+        let loggerRequire = './lib/logger.js';
+        if(loggerOptions.require) {
+            loggerRequire = loggerOptions.require;
         }
+        let loggerClass = require(loggerRequire);
+        this.logger = new loggerClass(loggerOptions);
     }
 
     _initFilter() {
@@ -114,13 +90,17 @@ class Server extends EventEmitter {
         var helpers = [];
         if(configs) {
             for(var i = 0; i < configs.length; i++) {
-                var config = configs[i];
-                var helperClass = require(config.require);
+                let config = configs[i];
+                let helperClass = require(config.require);
                 config.client = this.client;
-                config.logger = logger.getLogger(helperClass.name);
+                let loggerOptions = {
+                    name: helperClass.name
+                };
                 if(config.logLevel) {
-                    config.logger.setLevel(config.logLevel);
+                    loggerOptions.logLevel = config.logLevel;
                 }
+                config.logger = this.logger.getLogger(loggerOptions);
+                
                 if(config.filters) {
                     var filters = config.filters.map(filterName => this.filters[filterName]);
                     config.filters = filters;
@@ -135,9 +115,9 @@ class Server extends EventEmitter {
     /**
      * Syncronic validator
      */
-    _validatePreProcess(request, response) {
-        for(let i in this.preProcessValidators) {
-            if(!this.preProcessValidators[i].validate(request, response)) {
+    _prerequisite(request, response) {
+        for(let i in this.prerequisites) {
+            if(!this.prerequisites[i].isFulfilled(request, response)) {
                 return false;
             }
         }
@@ -148,7 +128,7 @@ class Server extends EventEmitter {
         let This = this;
 
         let ret = new Promise((resolve, reject) => {
-            if(This._validatePreProcess(request, response)) {
+            if(This._prerequisite(request, response)) {
                 let onReadable = () => {
                     request.removeListener('readable', onReadable);
                     request.pause();

@@ -1,6 +1,6 @@
 const expect = require("chai").expect;
 const kaltura = require('kaltura-ott-client');
-const KsProcessor = require('../lib/ks-processor');
+const KsProcessor = require('../lib/processors/ks');
 
 describe("ks-processor", () => {
     describe("crack", () => {
