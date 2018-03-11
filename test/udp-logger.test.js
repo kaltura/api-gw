@@ -28,7 +28,7 @@ const config = {
 
 // make it under tmp dir
 const configPath = `${os.tmpdir()}/api-gw-test-${shortid.generate()}`;
-fs.writeFile(configPath, JSON.stringify(config));
+fs.writeFileSync(configPath, JSON.stringify(config));
 
 function startServer(callback) {
 	let serverProcess = childProcess.fork('start', [configPath]);

@@ -7,6 +7,7 @@ const cluster = require("cluster");
 const Promise = require('bluebird');
 const kaltura = require('kaltura-ott-client');
 const EventEmitter = require('events').EventEmitter;
+const StringDecoder = require('string_decoder').StringDecoder;
 
 
 const Filter = require('./lib/filter');
@@ -127,25 +128,49 @@ class Server extends EventEmitter {
             return Promise.reject();
         }
 
+        let read = false;
+        let body = '';
+        let onReadable = () => {
+            request.pause();
+            request.removeListener('readable', onReadable);
+
+            const decoder = new StringDecoder('utf8');
+            
+            let chunk;
+            while (null !== (chunk = request.read())) {
+                const str = decoder.write(chunk);
+                body += str;
+            }
+            request.body = body.replace(/[\r\n]/g, '');
+            read = true;
+        };
+        request.on('readable', onReadable);
+        
+        let promise = new Promise((resolve, reject) => {
+            let handle = () => {
+                if(read) {
+                    resolve({
+                        request: request,
+                        response: response
+                    });
+                }
+                else {
+                    setTimeout(handle, 50);
+                }
+            };
+
+            handle();
+        });
+
         let processPromise = (index) => {
             return (data) => {
                 return This.processors[index].process(data);
             };
         };
 
-        let promise;
         let processIndex = 0;
         while(processIndex < this.processors.length) {
-            if(!processIndex) {
-                promise = processPromise(processIndex).apply(null, [{
-                    request: request,
-                    response: response
-                }]);
-            }
-            else {
-                promise = promise.then(processPromise(processIndex));
-            }
-            processIndex++;
+            promise = promise.then(processPromise(processIndex++));
         }
 
         return promise;
