@@ -235,6 +235,8 @@ class Server extends EventEmitter {
         var promises = this.proxies.map(proxy => proxy.proxy(request, response));
         return Promise.any(promises)
         .then(() => Promise.resolve(), () => Promise.reject('No proxy found'));
+        
+        request.resume();
     }
 
     _listen() {
