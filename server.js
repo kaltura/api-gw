@@ -47,6 +47,7 @@ class Server extends EventEmitter {
             this.cachers = this._initHelpers(this.config.cachers);
             this.proxies = this._initHelpers(this.config.proxies);
             this.enrichers = this._initHelpers(this.config.enrichers);
+            this.errorResponseWrappers = this._initHelpers(this.config.errorResponseWrappers);
         }
     }
 
@@ -239,6 +240,14 @@ class Server extends EventEmitter {
         request.resume();
     }
 
+    _errorResponse(err, request, response) {  
+        for(let i in this.errorResponseWrappers) {
+            if(this.errorResponseWrappers[i].wrap(err, request, response)) {
+                return;
+            }
+        }
+    }
+
     _listen() {
         var This = this;
 
@@ -313,21 +322,17 @@ class Server extends EventEmitter {
     }
 
     _onRequest(request, response) {
+        var now = new Date();
+        request.startTime = now.getMilliseconds();
+
         this._process(request, response)
         .then(() => this._validate(request, response))
         .then(() => this._startCache(request, response))
         .then(() => this._proxy(request, response))
         .catch((err) => {
             if(err) {
-                response.writeHead(500, {'Content-Type': 'text/plain'});
                 this.logger.error(err);
-                if(typeof(err) == 'object' && err.message) {
-                    
-                    response.end(err.message);
-                }
-                else {
-                    response.end(err);
-                }
+                this._errorResponse(err, request, response);
             }
         });
     }
