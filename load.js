@@ -1,11 +1,13 @@
 
+const os = require('os');
 const http = require('http');
 const cluster = require("cluster");
 const httpProxy = require('http-proxy');
 
 
 if (cluster.isMaster && process.argv.length > 2) {
-    for(var i = 0; i < process.argv[2]; i++) {
+    let forks = (process.argv[2] == '*' ? os.cpus().length : process.argv[2]);
+    for(var i = 0; i < forks; i++) {
         cluster.fork();
     }
 }
