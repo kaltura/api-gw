@@ -323,7 +323,7 @@ class Server extends EventEmitter {
 
     _onRequest(request, response) {
         var now = new Date();
-        request.startTime = now.getMilliseconds();
+        request.startTime = now.getTime();
 
         this._process(request, response)
         .then(() => this._validate(request, response))
