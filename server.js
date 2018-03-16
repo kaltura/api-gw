@@ -218,7 +218,7 @@ class Server extends EventEmitter {
             }
             
             _write.apply(response, [response.body, encoding]);
-            return _end.apply(response, [response.body, encoding, callback]);
+            return _end.apply(response, [callback]);
         };
 
         return new Promise((resolve, reject) => {
@@ -257,7 +257,7 @@ class Server extends EventEmitter {
             serversWaitingForListenEvent++;
             this.httpServer = http.createServer((request, response) => {
                 This._onRequest(request, response);
-            }).listen(this.config.ports.http, '127.0.0.1', () => {
+            }).listen(this.config.ports.http, () => {
                 serversWaitingForListenEvent--;
                 if(!serversWaitingForListenEvent) {
                     process.send('listening');
@@ -274,7 +274,7 @@ class Server extends EventEmitter {
 
             this.httpsServer = https.createServer(options, (request, response) => {
                 This._onRequest(request, response);
-            }).listen(this.config.ports.https, '127.0.0.1', () => {
+            }).listen(this.config.ports.https, () => {
                 serversWaitingForListenEvent--;
                 if(!serversWaitingForListenEvent) {
                     process.send('listening');
