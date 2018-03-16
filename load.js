@@ -6,7 +6,7 @@ const httpProxy = require('http-proxy');
 
 
 if (cluster.isMaster && process.argv.length > 2) {
-    let forks = (process.argv[2] == '*' ? os.cpus().length : process.argv[2]);
+    let forks = (process.argv[2] == 'all' ? os.cpus().length : process.argv[2]);
     for(var i = 0; i < forks; i++) {
         cluster.fork();
     }
