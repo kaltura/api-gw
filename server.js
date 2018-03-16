@@ -5,12 +5,11 @@ const http = require('http');
 const https = require('https');
 const cluster = require("cluster");
 const Promise = require('bluebird');
-const kaltura = require('kaltura-ott-client');
 const EventEmitter = require('events').EventEmitter;
-const StringDecoder = require('string_decoder').StringDecoder;
 
 
 const Filter = require('./lib/filter');
+const Workflow = require('./lib/workflow');
 const loggerProvider = require('./lib/logger');
 
 class Server extends EventEmitter {
@@ -38,23 +37,10 @@ class Server extends EventEmitter {
         this._initLogger();
 
         if(cluster.isWorker) {
-            this._initClient();
             this._initFilter();
-
-            this.prerequisites = this._initHelpers(this.config.prerequisites);
-            this.processors = this._initHelpers(this.config.processors);
-            this.validators = this._initHelpers(this.config.validators);
-            this.cachers = this._initHelpers(this.config.cachers);
-            this.proxies = this._initHelpers(this.config.proxies);
-            this.enrichers = this._initHelpers(this.config.enrichers);
-            this.errorResponseWrappers = this._initHelpers(this.config.errorResponseWrappers);
+            this._initModules();
+            this._initWorkflows();
         }
-    }
-
-    _initClient() {
-        let clientConfig = new kaltura.Configuration();
-        clientConfig.serviceUrl = this.config.serviceUrl;
-        this.client = new kaltura.Client(clientConfig);
     }
 
     _initLogger() {
@@ -84,166 +70,24 @@ class Server extends EventEmitter {
         }
     }
 
-    _initHelpers(configs) {
-        var helpers = [];
-        if(configs) {
-            for(var i = 0; i < configs.length; i++) {
-                let config = configs[i];
-                let helperClass = require(config.require);
-                config.client = this.client;
-                let loggerOptions = {
-                    name: helperClass.name
-                };
-                if(config.logLevel) {
-                    loggerOptions.logLevel = config.logLevel;
-                }
-                config.logger = loggerProvider.getLogger(loggerOptions);
-                
-                if(config.filters) {
-                    var filters = config.filters.map(filterName => this.filters[filterName]);
-                    config.filters = filters;
-                }
-                helpers.push(new helperClass(config, this));
+    _initModules() {
+        this.modules = {};
+        if(this.config.modules) {
+            for(var moduleName in this.config.modules) {
+                let config = this.config.modules[moduleName];
+                let moduleClass = require(config.require);
+                this.modules[moduleName] = new moduleClass(config, this);
             }
         }
-
-        return helpers;
     }
 
-    /**
-     * Syncronic validator
-     */
-    _prerequisite(request, response) {
-        for(let i in this.prerequisites) {
-            if(!this.prerequisites[i].isFulfilled(request, response)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    _process(request, response) {
-        let This = this;
-
-        if(!This._prerequisite(request, response)) {
-            return Promise.reject();
-        }
-
-        let read = false;
-        let body = '';
-        let onReadable = () => {
-            request.pause();
-            request.removeListener('readable', onReadable);
-
-            const decoder = new StringDecoder('utf8');
-            
-            let chunk;
-            while (null !== (chunk = request.read())) {
-                const str = decoder.write(chunk);
-                body += str;
-            }
-            request.body = body.replace(/[\r\n]/g, '');
-            read = true;
-        };
-        request.on('readable', onReadable);
-        
-        let promise = new Promise((resolve, reject) => {
-            let handle = () => {
-                if(read) {
-                    resolve({
-                        request: request,
-                        response: response
-                    });
-                }
-                else {
-                    setTimeout(handle, 50);
-                }
-            };
-
-            handle();
-        });
-
-        let processPromise = (index) => {
-            return (data) => {
-                return This.processors[index].process(data);
-            };
-        };
-
-        let processIndex = 0;
-        while(processIndex < this.processors.length) {
-            promise = promise.then(processPromise(processIndex++));
-        }
-
-        return promise;
-    }
-
-    _validate(request, response) {
-        return Promise.each(this.validators, (validator, index, length) => {
-            return validator.validate(request, response);
-        });
-    }
-
-    _startCache(request, response) {
-        var This = this;
-
-        var _write = response.write;
-        var _end = response.end;
-
-        response.body = '';
-        response.write = (chunk, encoding, callback) => {
-            //this.logger.debug(`Request [${request.key}] write`, chunk.toString('utf8'));
-            response.body += chunk;
-            if(callback) {
-                callback(chunk.length);
-            }
-            return chunk.length;
-            //return _write.apply(response, [chunk, encoding, callback]);
-        };
-        response.end = (data, encoding, callback) => {
-            if(!response.body) {
-                response.body = '';
-            }
-            if(data) {
-                response.body += data;
-            }
-
-            if(!response.fromCache) {
-                if(response.body) {
-                    This.enrichers.forEach(enricher => enricher.enrich(request, response));
-                }
-
-                if(response.body) {
-                    This.cachers.forEach(cacher => cacher.cache(request, response));
-                }
-            }
-            
-            _write.apply(response, [response.body, encoding]);
-            return _end.apply(response, [callback]);
-        };
-
-        return new Promise((resolve, reject) => {
-            var promises =  This.cachers.map(cacher => cacher.start(request, response));
-            Promise.any(promises)
-            .then(cache => reject(), err => resolve());
-        });
-    }
-
-    _proxy(request, response) {
-        if(!this.proxies.length) {
-            return Promise.reject('No proxy defined');
-        }
-
-        var promises = this.proxies.map(proxy => proxy.proxy(request, response));
-        return Promise.any(promises)
-        .then(() => Promise.resolve(), () => Promise.reject('No proxy found'));
-        
-        request.resume();
-    }
-
-    _errorResponse(err, request, response) {  
-        for(let i in this.errorResponseWrappers) {
-            if(this.errorResponseWrappers[i].wrap(err, request, response)) {
-                return;
+    _initWorkflows() {
+        this.workflows = {};
+        if(this.config.workflows) {
+            for(var workflowName in this.config.workflows) {
+                let config = this.config.workflows[workflowName];
+                config.name = workflowName;
+                this.workflows[workflowName] = new Workflow(config, this);
             }
         }
     }
@@ -257,11 +101,15 @@ class Server extends EventEmitter {
             serversWaitingForListenEvent++;
             this.httpServer = http.createServer((request, response) => {
                 This._onRequest(request, response);
-            }).listen(this.config.ports.http, () => {
+            })
+            .listen(this.config.ports.http, () => {
                 serversWaitingForListenEvent--;
                 if(!serversWaitingForListenEvent) {
                     process.send('listening');
                 }
+            })
+            .on('error', err => {
+                this.logger.error('HTTP server error', err);
             });
         }
         
@@ -269,16 +117,20 @@ class Server extends EventEmitter {
             serversWaitingForListenEvent++;
             let options = {};
             for(let key in this.config.sslOptions) {
-                options[key] = fs.readFileSync(this.config.sslOptions[key]);
+                options[key] = fs.readFileSync(path.resolve(process.cwd(), this.config.sslOptions[key]));
             }
 
             this.httpsServer = https.createServer(options, (request, response) => {
                 This._onRequest(request, response);
-            }).listen(this.config.ports.https, () => {
+            })
+            .listen(this.config.ports.https, () => {
                 serversWaitingForListenEvent--;
                 if(!serversWaitingForListenEvent) {
                     process.send('listening');
                 }
+            })
+            .on('error', err => {
+                this.logger.error('HTTPS server error', err);
             });
         }
     }
@@ -324,17 +176,28 @@ class Server extends EventEmitter {
     _onRequest(request, response) {
         var now = new Date();
         request.startTime = now.getTime();
-
-        this._process(request, response)
-        .then(() => this._validate(request, response))
-        .then(() => this._startCache(request, response))
-        .then(() => this._proxy(request, response))
-        .catch((err) => {
-            if(err) {
-                this.logger.error(err);
-                this._errorResponse(err, request, response);
-            }
-        });
+        
+        let workflowNames = Object.keys(this.workflows);
+        if(!workflowNames.length) {
+            response.writeHead(404, {"Content-Type": "text/plain"});
+            response.write("No workflow defined");
+            response.end();
+        }
+        else {
+            var promises = workflowNames.map(workflowName => this.workflows[workflowName].handle(request, response));
+            Promise.any(promises)
+            .then(() => {
+                this.logger.info(`Request [${request.key}] handled`);
+            }, (err) => {
+                this.logger.info(`Request [${request.key}] error`, err);
+            })
+            .catch((err) => {
+                this.logger.info(`Request [${request.key}] error`, err);
+                response.writeHead(404, {"Content-Type": "text/plain"});
+                response.write("No workflow matched request");
+                response.end();
+            });
+        }
     }
 
     _onProcessExit (childProcess, code) {

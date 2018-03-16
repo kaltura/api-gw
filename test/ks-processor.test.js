@@ -14,7 +14,7 @@ describe('ks-processor', () => {
 
     	it('cracked', (done) => {
 			
-			let details = ksProcessor.crackKs(ks)
+			let details = ksProcessor._crackKs(ks)
 			expect(details.partnerId).to.equal(203);
 			done();
         });
@@ -31,7 +31,7 @@ describe('ks-processor', () => {
 
     	it('cracked', (done) => {
 			
-			let details = ksProcessor.crackKs(ks)
+			let details = ksProcessor._crackKs(ks)
 			expect(details.sessionid).to.equal('efbf789cb6384739b82769e17b128fee');
 			done();
         });

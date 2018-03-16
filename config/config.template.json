@@ -1,62 +1,133 @@
 {
-    "serviceUrl": "@SERVICE_URL@",
-    "accessLogPath": "./log/access.{yyyy-mm-dd}.log",
-    "fieldsToIgnore": [
-        "ks",
-        "kalsig"
-    ],
-    "httpPort": 1337,
-    "httpsPort": 1338,
+    "logger": {
+        "logLevel": "DEBUG"
+    },
+    "ports": {
+        "http": 1337,
+        "https": 1338
+    },
     "sslOptions": {
         "key": "./config/key.pem",
         "cert": "./config/cert.pem"
     },
 
-    "preProcessValidators": [{
-        "require": "./lib/method-validator"
-    },{
-        "require": "./lib/path-validator",
-        "paths": [
-            "^/api_v3/service/[^\\/]+/action/[^\\/]+",
-            "^/v\\d+_\\d+/api_v3/service/[^\\/]+/action/[^\\/]+"
-        ]
-    }],
-    "processors": [{
-        "require": "./lib/query-string-processor"
-    },{
-        "require": "./lib/ks-processor",
-        "secrets": {
-            "@PARTNER_ID@": "@PARTNER_SECRET@"
+    "filters": {
+        "kaltura-api": {
+            "paths": [
+                "^/service/[^\\/]+/action/[^\\/]+",
+                "^/v\\d+_\\d+/service/[^\\/]+/action/[^\\/]+"
+            ]
+        },
+        "not-kaltura-api": {
+            "paths": [
+                "^/service/[^\\/]+/action/[^\\/]+",
+                "^/v\\d+_\\d+/service/[^\\/]+/action/[^\\/]+"
+            ],
+            "not": true
+        },
+        "json":  {
+            "contentTypes": ["application/json.*"]
+        },
+        "post":  {
+            "methods": ["POST"]  
+        },
+        "disabled":  {
+            "not": true
         }
-    },{
-        "require": "./lib/version-processor",
-        "overrides": {
-            "@PARTNER_ID@": {
-                "v2_[345]": "v2_5",
-                "v2_x": "v2_9",
-                "v3_x": "v3_9",
-                "vx": "v4_6"
+    },
+
+    "modules": {
+        "parse-json": {
+            "require": "./lib/processors/parse-json"
+        },
+        "query-string": {
+            "require": "./lib/processors/query-string"
+        },
+        "ks-processor": {
+            "require": "./lib/processors/ks",
+            "secrets": {
+                "@PARTNER_ID@": "@PARTNER_SECRET@"
             }
+        },
+        "stringify-json": {
+            "require": "./lib/processors/stringify-json"
+        },
+        "key-md5": {
+            "require": "./lib/processors/key-md5",
+            "fieldsToIgnore": [
+                "ks",
+                "kalsig"
+            ]
+        },
+        "ott-ks-validator": {
+            "require": "./lib/validators/ott-ks"
+        },
+        "file-cacher": {
+            "require": "./lib/cachers/file",
+            "path": "./cache"
+        },
+        "test-proxy": {
+            "require": "./lib/proxies/test",
+            "logLevel": "DEBUG"
         }
-    }],
-    "validators": [{
-        "require": "./lib/ks-validator"
-    },{
-        "require": "./lib/throttler"
-    }],
-    "cachers": [{
-        "require": "./lib/file-cacher",
-        "path": "./cache"
-    }],
-    "proxies": [{
-        "require": "./lib/api-proxy",
-        "target": "@SERVICE_URL@",
-        "paths": [
-            "^/api_v3/service/[^\\/]+/action/[^\\/]+",
-            "^/v\\d+_\\d+/api_v3/service/[^\\/]+/action/[^\\/]+"
-        ]
-    },{
-        "require": "./lib/test-proxy"
-    }],
-    "enrichers": []
+    },
+
+    "workflows": {
+        "Base": {
+            "filters": ["disabled"],
+            "processors": [{
+                "require": "./lib/processors/access-log",
+                "path": "./log/access.{yyyy-mm-dd}.log",
+                "urlReplacements": {
+                    "/password/[^\\/]+": "/password/###",
+                    "&password=[^&]+": "&password=###"
+                }
+            }],
+            "validators": [{
+                "require": "./lib/validators/throttler"
+            }]
+        }, 
+        "Kaltura": {
+            "extends": "Base",
+            "filters": ["kaltura-api", "json"],
+            "processors": [
+                "parse-json",
+                "query-string",
+                "ks-processor",
+                {
+                    "require": "./lib/processors/version",
+                    "overrides": {
+                        "203": {
+                            "v2_[345]": "v2_5",
+                            "v2_x": "v2_9",
+                            "v3_x": "v3_9",
+                            "vx": "v4_6"
+                        }
+                    }
+                },
+                "stringify-json",
+                "key-md5"
+            ],
+            "validators": ["ott-ks-validator"],
+            "cachers": ["file-cacher"],
+            "proxies": ["test-proxy"],
+            "errorResponseWrappers": [{
+                "require": "./lib/errorResponseWrappers/kaltura-ott"
+            }]
+        }, 
+        "3rd-party": {
+            "extends": "Base",
+            "filters": ["not-kaltura-api", "json", "post"],
+            "processors": [
+                "parse-json",
+                "ks-processor",
+                "stringify-json",
+                "key-md5"
+            ],
+            "validators": ["ott-ks-validator"],
+            "cachers": ["file-cacher"],
+            "proxies": ["test-proxy"]
+        }
+    }
+
 }

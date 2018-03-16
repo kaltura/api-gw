@@ -22,17 +22,21 @@ const config = {
     sslOptions: {
         key: './config/key.pem',
         cert: './config/cert.pem'
-    },
-    processors: [{
-        require: './lib/processors/parse-json'
-    }, {
-        require: './lib/processors/query-string'
-    },{
-        require: './lib/processors/stringify-json'
-    }],
-    proxies: [{
-        'require': './lib/proxies/test'
-    }]
+	},
+	workflows: {
+		test: {
+			processors: [{
+				require: './lib/processors/parse-json'
+			}, {
+				require: './lib/processors/query-string'
+			},{
+				require: './lib/processors/stringify-json'
+			}],
+			proxies: [{
+				'require': './lib/proxies/test'
+			}]
+		}
+	}
 };
 
 // make it under tmp dir

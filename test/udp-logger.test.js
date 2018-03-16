@@ -17,13 +17,17 @@ const config = {
 	ports: {
 		http: 1337
 	},
-    processors: [{
-		require: `${__dirname}/modules/test-processor`,
-		testText: testText
-    }],
-    proxies: [{
-        'require': './lib/proxies/test'
-    }]
+	workflows: {
+		test: {
+			processors: [{
+				require: `${__dirname}/modules/test-processor`,
+				testText: testText
+			}],
+			proxies: [{
+				'require': './lib/proxies/test'
+			}]
+		}
+	}
 };
 
 // make it under tmp dir
