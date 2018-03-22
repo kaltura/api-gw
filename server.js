@@ -2,6 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
+const uuid = require('uuid/v1');
 const https = require('https');
 const cluster = require("cluster");
 const Promise = require('bluebird');
@@ -176,6 +177,7 @@ class Server extends EventEmitter {
     _onRequest(request, response) {
         var now = new Date();
         request.startTime = now.getTime();
+        request.id = uuid();
         
         let workflowNames = Object.keys(this.workflows);
         if(!workflowNames.length) {
@@ -185,22 +187,30 @@ class Server extends EventEmitter {
         }
         else {
             var promises = workflowNames.map(workflowName => this.workflows[workflowName].handle(request, response));
-            Promise.any(promises)
-            .then(() => {
-                this.logger.info(`Request [${request.key}] handled`);
-            }, (err) => {
-                this.logger.info(`Request [${request.key}] error`, err);
-            })
-            .catch((err) => {
-                this.logger.info(`Request [${request.key}] error`, err);
-                response.writeHead(404, {"Content-Type": "text/plain"});
-                response.write("No workflow matched request");
-                response.end();
-            });
+            try{
+                Promise.any(promises)
+                .then(() => {
+                    this.logger.info(`Request [${request.id}] handled`);
+                }, (err) => {
+                    this.logger.error(`Request [${request.id}] all workflows rejected`, err);
+                })
+                .catch((err) => {
+                    this.logger.error(`Request [${request.id}] error`, err);
+                    response.writeHead(404, {"Content-Type": "text/plain"});
+                    response.write("No workflow matched request");
+                    response.end();
+                });
+            }
+            catch(e) {
+                console.log('err', e);
+            }
         }
     }
 
     _onProcessExit (childProcess, code) {
+        if(code === null) {
+            this.stop();
+        }
         this.logger.info(`Worker ${childProcess.process.pid} died, exit code ${code}`);
         delete this.childProcesses[childProcess.process.pid];
         if(this.closing) {

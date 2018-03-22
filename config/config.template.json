@@ -3,8 +3,8 @@
         "logLevel": "DEBUG"
     },
     "ports": {
-        "http": 1337,
-        "https": 1338
+        "http": 80,
+        "https": 443
     },
     "sslOptions": {
         "key": "./config/key.pem",
