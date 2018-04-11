@@ -8,7 +8,7 @@ const KsValidator = require('../lib/validators/ott-ks');
 
 let debug = false;
 let partnerId = 203;
-let serviceUrl = 'http://localhost/ott_rest/';
+let serviceUrl = 'http://34.249.122.223:8080/v4_8';
 let connectionString = 'couchbase://couchbase1,couchbase2,couchbase3';
 
 const configPath = './config/test.json';
@@ -67,6 +67,7 @@ describe('OTT KS validator', () => {
 			
 			ksValidator.validate({
 				session: {
+					ks: shortid.generate(),
 					expiry: Math.round((new Date()).getTime() / 1000) - 5000
 				}
 			})
